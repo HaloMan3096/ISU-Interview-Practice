@@ -9,7 +9,7 @@ This repository contains the Interview Practice portion of the Job Tools project
 If you haven't downloaded the repository yet, open a terminal and run:
 
 ```bash
-git clone https://github.com/USERNAME/REPOSITORY-NAME.git
+git clone https://github.com/HaloMan3096/ISU-Interview-Practice.git
 ```
 
 Navigate into the project directory:
