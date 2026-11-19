@@ -140,3 +140,94 @@ Once your work is ready to be added to the main project:
 | Get remote updates | `git fetch origin` |
 | Merge latest main | `git merge origin/main` |
 
+# Interview Practice Coach
+
+> **Produced by Claude (Anthropic).** This project was written by **Claude Sonnet 5.5** in **Jennafer Ortiz’s Claude account**. Prompts used: Jennafer asked for an app that helps users practise for job interviews and shared the ECT 437 business case “AI Interview Prep. System”; she then asked for a version that can be shared on GitHub and run on a person’s own computer. At run time, the questions and feedback come from whichever model *you* configure (Anthropic’s Claude via API key, or a local model through Ollama).
+
+A small app that runs on your own computer. Paste or upload your résumé, enter the job you want, and practise with tailored questions. You get feedback scored with the **STAR method** (Situation, Task, Action, Result).
+
+It is a **coach, not an answer machine**: it never writes your answers, and its feedback may be wrong, so treat it as guidance. It is for practice and preparation only, not for use during a live interview.
+
+## Quick start
+
+You need **Python 3.9 or newer**. There is nothing to install for the basics.
+
+```bash
+git clone <your-repo-url>
+cd interview-practice-coach
+```
+
+For a full checklist of what to install, with troubleshooting, see **INSTALL.md**.
+
+Then choose **one** way to power the AI:
+
+**Option A: Anthropic API (Claude)**
+
+```bash
+# macOS / Linux
+export ANTHROPIC_API_KEY="your-key-here"
+python3 app.py
+
+# Windows (PowerShell)
+$env:ANTHROPIC_API_KEY="your-key-here"
+python app.py
+```
+
+**Option B: Free local model with [Ollama](https://ollama.com)**
+
+```bash
+ollama pull llama3.1
+python3 app.py          # uses Ollama automatically when no API key is set
+```
+
+Your browser opens at http://localhost:8765. With no provider set up, the app still works with generic questions and a STAR self-check.
+
+## Settings (environment variables)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | none | Your Anthropic API key. Never stored by the app. |
+| `INTERVIEW_PROVIDER` | `anthropic` if a key is set, else `ollama` | `anthropic` or `ollama` |
+| `INTERVIEW_MODEL` | `claude-sonnet-5-5` / `llama3.1` | Model name for the chosen provider |
+| `OLLAMA_HOST` | `http://localhost:11434` | Where Ollama is running |
+| `PORT` | `8765` | Local port |
+
+Résumé files: `.txt`, `.md` and `.docx` work out of the box. For `.pdf`, run `pip install pypdf` once. You can always paste text instead.
+
+## Feedback
+
+- **After each answer:** STAR scores (1–5) for Situation, Task, Action and Result, what worked, what to improve, and a reflective question.
+- **After the session:** click **Finish session** to see average scores, a recap of every question, and an **overall review** that looks for patterns across all your answers, with priorities and next practice steps. If the overall review fails (for example, the model times out), a **Try again** button appears and your per-question results stay on screen.
+
+## Field-specific questions
+
+The job title drives the questions. Enter something like “Graphic Design”, “IT Support”, “Computer Science” or “Aviation”, pick an experience level, and the AI writes questions a real interviewer in that field would ask (real tools, standards and workflows, not generic ones). More specific titles give sharper questions, e.g. “Junior UX Designer” or “Aircraft Maintenance Technician”.
+
+Without an AI provider, the app falls back to a built-in set of five questions for each of these areas, matched by keywords in the job title: education (teachers, aides), ESL, library, medical and healthcare, animal care and veterinary, graphic design, IT, computer science, aviation, sciences, history, retail and customer service, and food service. Other titles get general behavioral questions. To add a field, add an entry to the `FIELDS` list in `static/index.html`.
+
+## Privacy
+
+- The server listens only on your own machine (`127.0.0.1`).
+- Your résumé and answers are sent **only** to the provider you chose: Anthropic’s API, or your local Ollama (which stays on your computer).
+- The app does not save résumés or answers. The browser keeps only job title and average score for past sessions, and you can clear it with the **Clear** button.
+- API usage may cost money on your Anthropic account. Ollama is free but needs a reasonably capable computer.
+
+## Project layout
+
+```
+app.py            Local server, prompts, résumé reading, AI calls (standard library only)
+static/index.html The interface
+```
+
+## Known limitations
+
+- Scoring has not been tested against real interview answers, and AI feedback can be inconsistent.
+- Typed answers only (no voice yet); one session at a time.
+- Add a license file before sharing publicly (for example MIT) so others know how they may use the code.
+
+## References
+
+1. Business case “Business Case: AI Interview Prep. System”, ECT 437-301 Industrial Computer Systems Management (project team including Jennafer Ortiz; sponsor Jeff Kinne), file `Business_Case_Interview__.docx`. Source of the requirements: résumé-based questions, STAR evaluation, practice not answers, an AI-may-be-wrong notice, and no résumé storage unless requested.
+2. The STAR method (Situation, Task, Action, Result), a widely used behavioral-interview framework. From Claude’s training data; no specific web page was consulted.
+3. Anthropic Messages API and Ollama chat API request formats, and Python standard-library `http.server`, `urllib`, `zipfile`. From Claude’s training data; no online documentation was retrieved while writing this.
+4. General interview-coaching practice and common behavioral and technical question styles, from Claude’s training data.
