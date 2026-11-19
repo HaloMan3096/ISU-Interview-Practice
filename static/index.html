@@ -39,6 +39,8 @@ ul{margin:.3rem 0 .6rem;padding-left:1.2rem}
 .err{color:#c0392b;font-size:.9rem;margin-top:8px}
 footer{margin:28px 0 8px;font-size:.85rem;color:var(--mut)}footer ol{padding-left:1.2rem}
 .prog{height:6px;background:var(--bar);border-radius:99px;overflow:hidden;margin-bottom:8px}.prog i{display:block;height:100%;background:var(--ac)}
+.rpt h1{font-size:1.4rem}.rpt h3{margin:1.2rem 0 .3rem;font-size:1.05rem}.rpt .ans{white-space:pre-wrap;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;margin:4px 0 8px}.rpt table{border-collapse:collapse;margin:.4rem 0}.rpt td,.rpt th{border:1px solid var(--bd);padding:4px 10px;text-align:left}.rpt .q{break-inside:avoid;margin-bottom:14px}
+@media print{body{background:#fff;color:#000}main>*:not(#report){display:none!important}#report{display:block!important;border:0;padding:0}.rpt .ans{background:#fff;border-color:#999}.rpt td,.rpt th{border-color:#999}}
 </style>
 </head>
 <body>
@@ -70,7 +72,7 @@ footer{margin:28px 0 8px;font-size:.85rem;color:var(--mut)}footer ol{padding-lef
     <div><label for="qn">Number of questions</label>
       <select id="qn"><option>3</option><option selected>5</option><option>7</option></select></div>
   </div>
-  <div class="actions"><button id="start">Start practising</button></div>
+  <div class="actions"><button id="start">Start Practicing</button></div>
   <div id="serr" class="err"></div>
   <div id="hist" class="hint"></div>
 </section>
@@ -98,8 +100,11 @@ footer{margin:28px 0 8px;font-size:.85rem;color:var(--mut)}footer ol{padding-lef
   <h2>Session summary</h2>
   <div id="sumscores"></div>
   <div id="sumtext"></div>
-  <div class="actions"><button id="again">Start a new session</button></div>
+  <div class="actions"><button id="dl">Download report</button><button class="alt" id="prt">Print report</button><button class="alt" id="again">Start a new session</button></div>
+  <p class="hint">The report includes your questions, your answers, your scores and the feedback. To save a PDF, choose Print report, then “Save as PDF” as the printer.</p>
 </section>
+
+<section id="report" class="card hidden rpt" aria-label="Printable report"></section>
 
 <footer>
   <strong>References</strong>
@@ -273,18 +278,21 @@ $("start").onclick = async () => {
   S.role = $("role").value.trim(); S.level = $("level").value; $("serr").textContent = "";
   if (!S.role) { $("serr").textContent = "Enter a target job title to start."; return; }
   const n = Number($("qn").value), btn = $("start"); btn.disabled = true; btn.textContent = "Preparing questions…";
-  let qs = null;
+  S.usedFallback = false; let qs = null;
+  const noResume = !$("resume").value.trim();
   if (ready) {
     try {
       qs = (await api("/api/questions", { role: S.role, resume: $("resume").value, jd: $("jd").value, qtype: $("qtype").value, level: $("level").value, n })).questions;
     } catch (e) { $("serr").textContent = e.message + " Using built-in questions instead."; }
   }
   if (!qs || !qs.length) {
-    const fb = fallback(S.role, $("qtype").value, n); qs = fb.qs;
+    const fb = fallback(S.role, $("qtype").value, n); qs = fb.qs; S.usedFallback = true;
     if (!fb.field) $("serr").textContent = ($("serr").textContent + " No built-in set matches this job title, so these are general questions. Connect an AI provider for questions specific to it.").trim();
   }
+  if (noResume) $("serr").textContent = ($("serr").textContent + " No résumé text was found, so these questions are not personalised to your résumé. Pick the file again or paste the text into the box.").trim();
+  else if (!ready || !qs || S.usedFallback) $("serr").textContent = ($("serr").textContent + " Built-in questions do not use your résumé or job description.").trim();
   S.qs = qs; S.i = 0; S.res = [];
-  btn.disabled = false; btn.textContent = "Start practising";
+  btn.disabled = false; btn.textContent = "Start Practicing";
   showQ();
 };
 
@@ -307,12 +315,12 @@ $("submit").onclick = async () => {
   try {
     if (ready) {
       const f = await api("/api/feedback", { role: S.role, question: S.qs[S.i].q, answer: a });
-      S.res[S.i] = { scores: f.scores, a, strengths: f.strengths || [], improvements: f.improvements || [] };
+      S.res[S.i] = { scores: f.scores, a, strengths: f.strengths || [], improvements: f.improvements || [], coach: f.coach_question || "" };
       bars($("scores"), f.scores);
       t.append(list("What worked", f.strengths), list("What to improve", f.improvements));
       if (f.coach_question) { t.append(el("strong", "Think about this")); t.append(el("p", f.coach_question)); }
     } else {
-      $("scores").replaceChildren(); S.res[S.i] = { scores: {} };
+      $("scores").replaceChildren(); S.res[S.i] = { scores: {}, a };
       t.append(el("strong", "STAR self-check"), list("", KEYS.map(k => k[0].toUpperCase() + k.slice(1) + ": " + TIPS[k])));
     }
   } catch (e) { $("ferr").textContent = e.message; btn.disabled = false; btn.textContent = "Get feedback"; return; }
@@ -324,6 +332,7 @@ $("next").onclick = advance;
 function advance() { S.i++; S.i >= S.qs.length ? finish() : showQ(); }
 
 function finish() {
+  S.overall = null;
   const scored = S.res.filter(r => r && KEYS.some(k => r.scores[k]));
   const avg = {}; let tot = 0, cnt = 0;
   KEYS.forEach(k => { const v = scored.map(r => Number(r.scores[k]) || 0).filter(Boolean); avg[k] = v.length ? v.reduce((x, y) => x + y, 0) / v.length : 0; if (v.length) { tot += avg[k]; cnt++; } });
@@ -354,6 +363,7 @@ async function loadOverall() {
   try {
     const items = S.res.map((r, i) => r && r.a ? { question: S.qs[i].q, answer: r.a, scores: r.scores, strengths: r.strengths, improvements: r.improvements } : null).filter(Boolean);
     const o = await api("/api/summary", { role: S.role, level: S.level, total: S.qs.length, items });
+    S.overall = o;
     ov.replaceChildren(el("h2", "Overall feedback"), el("p", o.summary),
       list("What you’re doing well", o.strengths), list("What to focus on", o.priorities), list("Next practice steps", o.next_steps));
   } catch (e) {
@@ -361,6 +371,48 @@ async function loadOverall() {
     ov.replaceChildren(el("h2", "Overall feedback"), el("p", "Couldn’t write the overall feedback: " + e.message, "err"), b);
   }
 }
+function buildReport() {
+  const r = $("report"); r.replaceChildren();
+  const avgOf = sc => { const v = KEYS.map(k => Number(sc && sc[k]) || 0).filter(Boolean); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : 0; };
+  r.append(el("h1", "Interview Practice Report"));
+  r.append(el("p", "Target job: " + S.role + "  |  Level: " + $("level").selectedOptions[0].textContent + "  |  Date: " + new Date().toLocaleDateString()));
+  r.append(el("p", "Generated by Interview Practice Coach, an app written by Claude (Anthropic) in Jennafer Ortiz’s Claude account. Questions and feedback were produced by an AI model and may be wrong.", "hint"));
+  const scored = S.res.filter(x => x && avgOf(x.scores));
+  if (scored.length) {
+    const tbl = el("table"), hr = el("tr");
+    ["Overall", ...KEYS.map(k => k[0].toUpperCase() + k.slice(1))].forEach(t => hr.append(el("th", t)));
+    const dr = el("tr");
+    const avg = k => { const v = scored.map(x => Number(x.scores[k]) || 0).filter(Boolean); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; };
+    dr.append(el("td", (KEYS.reduce((a, k) => a + avg(k), 0) / KEYS.length).toFixed(1) + "/5"));
+    KEYS.forEach(k => dr.append(el("td", avg(k).toFixed(1) + "/5")));
+    tbl.append(hr, dr); r.append(el("h3", "Average scores (1 to 5)"), tbl);
+  }
+  S.qs.forEach((q, i) => {
+    const x = S.res[i] || {}, d = el("div", null, "q");
+    d.append(el("h3", "Question " + (i + 1) + " (" + (q.type === "technical" ? "Technical" : "Behavioral") + ")"), el("p", q.q));
+    if (x.a) { d.append(el("strong", "Your answer"), el("div", x.a, "ans")); } else d.append(el("p", "Skipped.", "hint"));
+    if (avgOf(x.scores)) {
+      d.append(el("p", "Scores: " + KEYS.map(k => k[0].toUpperCase() + k.slice(1) + " " + (x.scores[k] || "?") + "/5").join(", ") + "  (average " + avgOf(x.scores).toFixed(1) + "/5)"));
+      d.append(list("What worked", x.strengths), list("What to improve", x.improvements));
+      if (x.coach) d.append(el("strong", "Think about this"), el("p", x.coach));
+    }
+    r.append(d);
+  });
+  if (S.overall) {
+    r.append(el("h3", "Overall feedback"), el("p", S.overall.summary), list("What you’re doing well", S.overall.strengths), list("What to focus on", S.overall.priorities), list("Next practice steps", S.overall.next_steps));
+  }
+  return r;
+}
+$("prt").onclick = () => { buildReport(); window.print(); };
+$("dl").onclick = () => {
+  const r = buildReport();
+  const css = "body{font:16px/1.55 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;max-width:760px;margin:24px auto;padding:0 16px;color:#1f1e1b}.hint{color:#66635b;font-size:.85rem}.ans{white-space:pre-wrap;background:#faf9f6;border:1px solid #ccc;border-radius:8px;padding:8px 10px;margin:4px 0 8px}table{border-collapse:collapse}td,th{border:1px solid #999;padding:4px 10px;text-align:left}.q{break-inside:avoid;margin-bottom:14px}h3{margin:1.2rem 0 .3rem}";
+  const doc = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Interview Practice Report</title><style>" + css + "</style></head><body>" + r.innerHTML + "</body></html>";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([doc], { type: "text/html" }));
+  a.download = "interview-practice-report-" + new Date().toISOString().slice(0, 10) + ".html";
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
 $("again").onclick = () => { renderHistory(); show("setup"); };
 renderHistory();
 </script>
