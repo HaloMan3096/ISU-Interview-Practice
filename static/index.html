@@ -36,6 +36,10 @@ button:disabled{opacity:.55;cursor:default}
 .bar{height:9px;background:var(--bar);border-radius:99px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac)}
 ul{margin:.3rem 0 .6rem;padding-left:1.2rem}
 .hidden{display:none}
+.priv{border:1px solid var(--bd);border-radius:10px;padding:10px 12px;margin:10px 0;font-size:.9rem;background:var(--soft)}
+.priv details{margin-top:6px}.priv summary{cursor:pointer;color:var(--ac);font-weight:600}
+.priv pre{white-space:pre-wrap;word-break:break-word;font:inherit;margin:4px 0 8px;max-height:220px;overflow:auto;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px 10px}
+mark{background:#ffe08a;color:#1f1e1b;border-radius:4px;padding:0 3px;font-weight:600}
 .err{color:#c0392b;font-size:.9rem;margin-top:8px}
 footer{margin:28px 0 8px;font-size:.85rem;color:var(--mut)}footer ol{padding-left:1.2rem}
 .prog{height:6px;background:var(--bar);border-radius:99px;overflow:hidden;margin-bottom:8px}.prog i{display:block;height:100%;background:var(--ac)}
@@ -59,9 +63,16 @@ footer{margin:28px 0 8px;font-size:.85rem;color:var(--mut)}footer ol{padding-lef
   <p class="hint">The more specific the title, the more specific the questions.</p>
   <label for="rfile">Résumé file (.txt, .md, .docx, .pdf) or paste text below</label>
   <input id="rfile" type="file" accept=".txt,.md,.docx,.pdf">
-  <textarea id="resume" placeholder="Résumé text. It’s sent only to the AI provider you configured and is never saved by this app."></textarea>
+  <textarea id="resume" placeholder="Résumé text. Personal details are removed on your computer before it goes to the AI provider you configured, and this app never saves it."></textarea>
   <label for="jd">Job description (optional)</label>
   <textarea id="jd" style="min-height:80px" placeholder="Paste the posting to get more targeted questions."></textarea>
+  <div id="priv" class="priv hidden" aria-live="polite">
+    <strong id="privsum"></strong>
+    <details open><summary>Show exactly what the AI will see</summary>
+      <div class="hint">Résumé</div><pre id="privres"></pre>
+      <div class="hint">Job description</div><pre id="privjd"></pre>
+    </details>
+  </div>
   <div class="row">
     <div><label for="level">Experience level</label>
       <select id="level"><option value="entry">Internship / entry level</option><option value="early">Early career (1–3 years)</option><option value="experienced">Experienced (4+ years)</option></select></div>
@@ -82,6 +93,10 @@ footer{margin:28px 0 8px;font-size:.85rem;color:var(--mut)}footer ol{padding-lef
   <label for="ans">Your answer</label>
   <textarea id="ans" placeholder="Answer in your own words, out loud first if you can. For behavioral questions, try Situation, Task, Action, Result."></textarea>
   <p class="hint">Tip: aim for 1–2 minutes of speaking, roughly 150–300 words.</p>
+  <div id="apriv" class="priv hidden" aria-live="polite">
+    <strong id="aprivsum"></strong>
+    <details><summary>Show what the AI saw</summary><pre id="aprivtxt"></pre></details>
+  </div>
   <div class="actions"><button id="submit">Get feedback</button><button class="alt" id="skip">Skip question</button></div>
   <div id="ferr" class="err"></div>
   <div id="fb" class="hidden">
@@ -229,8 +244,9 @@ const api = (path, obj) => post(path, JSON.stringify(obj), { "Content-Type": "ap
 fetch("/api/config").then(r => r.json()).then(c => {
   ready = c.ready;
   $("cfg").textContent = c.ready
-    ? "AI provider: " + c.provider + " · model: " + c.model + ". Your résumé and answers are sent to this provider."
+    ? "AI provider: " + c.provider + " · model: " + c.model + ". " + (c.redact ? "Personal details (names, emails, phone numbers, addresses, links) are removed on your computer before your résumé and answers are sent to this provider." : "Warning: personal-info removal is turned off, so your résumé and answers are sent as written.")
     : "No AI provider is set up yet, so you’ll get built-in questions (field-specific for teaching, ESL, library, medical, animal care, design, IT, computer science, aviation, sciences, history, retail and food service) and a STAR self-check. See the README to connect one.";
+  updatePreview();
 }).catch(() => { $("cfg").textContent = "Can’t reach the local server. Is app.py still running?"; });
 
 function show(id) { ["setup", "practice", "summary"].forEach(s => $(s).classList.toggle("hidden", s !== id)); window.scrollTo(0, 0); }
@@ -260,12 +276,41 @@ function renderHistory() {
   box.append(c);
 }
 
+/* Privacy preview: shows the text after personal details are replaced by placeholders such as [EMAIL]. */
+function marked(target, text) {
+  target.replaceChildren();
+  String(text || "").split(/(\[[A-Z][A-Z ]*\])/).forEach((p, i) => target.append(i % 2 ? el("mark", p) : document.createTextNode(p)));
+}
+function countLine(c, enabled) {
+  if (!enabled) return "Personal-info removal is OFF: this text is sent exactly as written.";
+  const parts = Object.entries(c).map(([k, v]) => v + " " + k.toLowerCase()), tot = Object.values(c).reduce((a, b) => a + b, 0);
+  return tot ? tot + (tot === 1 ? " item" : " items") + " removed before sending (" + parts.join(", ") + ")" : "No personal details found by the automatic check. Read the text below to be sure.";
+}
+function mergeCounts(a, b) { const o = Object.assign({}, a); Object.entries(b).forEach(([k, v]) => o[k] = (o[k] || 0) + v); return o; }
+let pseq = 0, ptimer = null;
+async function updatePreview() {
+  const box = $("priv"), r = $("resume").value, j = $("jd").value, my = ++pseq;
+  if (!ready || (!r.trim() && !j.trim())) { box.classList.add("hidden"); return; }
+  try {
+    const empty = { text: "", counts: {}, enabled: true };
+    const a = r.trim() ? await api("/api/redact", { text: r, learn: true }) : empty;  // résumé first: it teaches the name
+    const b = j.trim() ? await api("/api/redact", { text: j }) : empty;
+    if (my !== pseq) return;  // a newer edit has replaced this one
+    $("privsum").textContent = countLine(mergeCounts(a.counts, b.counts), a.enabled !== false && b.enabled !== false);
+    marked($("privres"), a.text || "(empty)"); marked($("privjd"), b.text || "(empty)");
+    box.classList.remove("hidden");
+  } catch (e) { box.classList.add("hidden"); }
+}
+const schedulePreview = () => { clearTimeout(ptimer); ptimer = setTimeout(updatePreview, 500); };
+$("resume").addEventListener("input", schedulePreview);
+$("jd").addEventListener("input", schedulePreview);
+
 $("rfile").onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   $("serr").textContent = "";
   try {
     const j = await post("/api/extract", await f.arrayBuffer(), { "X-Filename": f.name, "Content-Type": "application/octet-stream" });
-    $("resume").value = j.text.trim();
+    $("resume").value = j.text.trim(); updatePreview();
   } catch (err) { $("serr").textContent = err.message; }
 };
 
@@ -294,7 +339,7 @@ function showQ() {
   $("qcount").textContent = "Question " + (S.i + 1) + " of " + S.qs.length;
   $("qtext").textContent = q.q; $("ans").value = ""; $("ferr").textContent = "";
   $("pbar").style.width = (S.i / S.qs.length * 100) + "%";
-  $("fb").classList.add("hidden"); $("submit").disabled = false; $("submit").textContent = ready ? "Get feedback" : "Show STAR self-check";
+  $("fb").classList.add("hidden"); $("apriv").classList.add("hidden"); $("submit").disabled = false; $("submit").textContent = ready ? "Get feedback" : "Show STAR self-check";
   $("next").textContent = S.i === S.qs.length - 1 ? "Finish session" : "Next question";
   show("practice");
 }
@@ -306,6 +351,11 @@ $("submit").onclick = async () => {
   const t = $("fbtext"); t.replaceChildren();
   try {
     if (ready) {
+      try {
+        const p = await api("/api/redact", { text: a });
+        $("aprivsum").textContent = countLine(p.counts, p.enabled !== false).replace("before sending", "from your answer before sending");
+        marked($("aprivtxt"), p.text); $("apriv").classList.remove("hidden");
+      } catch (e) { /* preview is optional; the real request still redacts */ }
       const f = await api("/api/feedback", { role: S.role, question: S.qs[S.i].q, answer: a });
       S.res[S.i] = { scores: f.scores, a, strengths: f.strengths || [], improvements: f.improvements || [] };
       bars($("scores"), f.scores);
